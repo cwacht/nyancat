@@ -1,54 +1,192 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+<!-- Adapted to work with the getUserMedia API using code from http://wesbos.com/html5-video-face-detection-canvas-javascript/ -->
 	<head>
-		<title>3D Nyan Cat!!!!!</title>
 		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<title>NyanCam!</title>
 		<style>
-			body {
-				background:#003366;		color:#fff;
-				padding:0;				margin:0;
-				overflow:hidden;		font-family:georgia;
-				text-align:center;
-			}
-			a {	color: #ff0080;	text-decoration: none; }
-			a:hover { color: #0080ff; }
+body {
+	font-family: sans-serif;
+	font-size: 17px;
+	line-height: 24px;
+	color: #fff;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	text-align: center;
+	background-color: #003366;
+}
 
-			#a { position:absolute;	top:0; left:0;
-				background:rgba(0,0,0,0.75); padding:1em;
-				border-radius: 0 0 30px 0;
-				-webkit-box-shadow: 0px 0px 20px rgba(0,0,0,1) }
-			#b { position:absolute; top:0; right:0;
-				background:rgba(0,0,0,0.75); padding:1em;
-				border-radius: 0 0 0 30px;
-				-webkit-box-shadow: 0px 0px 20px rgba(0,0,0,1) }
-			#c { position:absolute; bottom:0; left:0;
-				background:rgba(0,0,0,0.75); padding:1em;
-				border-radius: 0 30px 0 0;
-				-webkit-box-shadow: 0px 0px 20px rgba(0,0,0,1) }
-			#d { position:absolute; bottom:0; right:0;
-				background:rgba(0,0,0,0.75); padding:1em;
-				border-radius: 30px 0 0 0;
-				-webkit-box-shadow: 0px 0px 20px rgba(0,0,0,1) }
+#info {
+	position: absolute;
+	width: 100%;
+	height: 30px;
+	top: 50%;
+	margin-top: -15px;
+}
+
+#output {
+	width: auto;
+	height: 100%;
+	background: black;
+	-webkit-transform: scale(-1, 1);
+}
 		</style>
 	</head>
 	<body>
-		<div id="a">3D Nyan Cat!!!!!</div>
-		<div id="b">Built in WebGL using <a href="http://github.com/mrdoob/three.js">Three.js</a>.</div>
-		<div id="c">Click anywhere to pause.</div>
-		<div id="d">More <a href="http://nyan.cat/" target="_blank">Nyan Cat</a>.</div>
-
+		<p id="info">Please allow access to your camera!</p>
+		<script src="js/ccv.js"></script>
+		<script src="js/face.js"></script>
 		<script src="js/Three.js"></script>
-		<script src="js/Detector.js"></script>
-		<script src="js/RequestAnimationFrame.js"></script>
-		<script src="js/Stats.js"></script>
+
 
 		<script>
-			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
-			var statsEnabled = false, container, stats;
-			var camera, scene, renderer, poptart, face, feet, tail;
+
+// requestAnimationFrame shim
+(function() {
+	var i = 0,
+		lastTime = 0,
+		vendors = ['ms', 'moz', 'webkit', 'o'];
+	
+	while (i < vendors.length && !window.requestAnimationFrame) {
+		window.requestAnimationFrame = window[vendors[i] + 'RequestAnimationFrame'];
+		i++;
+	}
+	
+	if (!window.requestAnimationFrame) {
+		window.requestAnimationFrame = function(callback, element) {
+			var currTime = new Date().getTime(),
+				timeToCall = Math.max(0, 1000 / 60 - currTime + lastTime),
+				id = setTimeout(function() { callback(currTime + timeToCall); }, timeToCall);
+			
+			lastTime = currTime + timeToCall;
+			return id;
+		};
+	}
+}());
+
+var App = {
+	start: function(stream) {
+			App.video.addEventListener('canplay', function() {
+			App.video.removeEventListener('canplay');
+			setTimeout(function() {
+				App.video.play();
+				//App.canvas.style.display = 'inline';
+				App.info.style.display = 'none';
+				//App.canvas.width = App.video.videoWidth;
+				//App.canvas.height = App.video.videoHeight;
+				App.backCanvas.width = App.video.videoWidth / 4;
+				App.backCanvas.height = App.video.videoHeight / 4;
+				App.backContext = App.backCanvas.getContext('2d');
+			
+				var w = 300 / 4 * 0.8,
+					h = 270 / 4 * 0.8;
+			
+				App.comp = [{
+					x: (App.video.videoWidth / 4 - w) / 2,
+					y: (App.video.videoHeight / 4 - h) / 2,
+					width: w, 
+					height: h,
+				}];
+			
+				App.drawToCanvas();
+			}, 500);
+		}, true);
+		
+		var domURL = window.URL || window.webkitURL;
+		App.video.src = domURL ? domURL.createObjectURL(stream) : stream;
+	},
+	denied: function() {
+		App.info.innerHTML = 'Camera access denied!<br>Please reload and try again.';
+	},
+	error: function(e) {
+		if (e) {
+			console.error(e);
+		}
+		App.info.innerHTML = 'Please go to about:flags in Google Chrome and enable the &quot;MediaStream&quot; flag.';
+	},
+	drawToCanvas: function() {
+		requestAnimationFrame(App.drawToCanvas);
+		
+		var video = App.video,
+			//ctx = App.context,
+			backCtx = App.backContext,
+			m = 4,
+			w = 4,
+			i,
+			comp;
+		
+		//ctx.drawImage(video, 0, 0, App.canvas.width, App.canvas.height);
+		
+		backCtx.drawImage(video, 0, 0, App.backCanvas.width, App.backCanvas.height);
+		
+		comp = ccv.detect_objects(App.ccv = App.ccv || {
+			canvas: App.backCanvas,
+			cascade: cascade,
+			interval: 4,
+			min_neighbors: 1
+		});
+		
+		if (comp.length) {
+			App.comp = comp;
+		}
+		
+		for (i = App.comp.length; i--; ) {
+			/*/ctx.drawImage(App.glasses, (App.comp[i].x - w / 2) * m, (App.comp[i].y - w / 2) * m, (App.comp[i].width + w) * m, (App.comp[i].height + w) * m);/**/
+
+			//ctx.fillStyle="#FF0000";
+			//ctx.fillRect((App.comp[i].x - w / 2) * m,(App.comp[i].y - w / 2) * m,(App.comp[i].width + w) * m,(App.comp[i].height + w) * m);
+			//console.log("X: "+App.comp[i].x+", Y: "+App.comp[i].y+", Z: "+App.comp[i].width);
+			mouseX = ( App.comp[i].x -50)/-1;
+			mouseY = ( App.comp[i].y -50)/-1;
+			//faceZ = 10+(100-( App.comp[i].width )/2);
+			faceZ = ( App.comp[i].width );
+		}
+	}
+};
+
+App.glasses = new Image();
+App.glasses.src = 'glasses.png';
+
+App.init = function() {
+	App.video = document.createElement('video');
+	App.backCanvas = document.createElement('canvas');
+	//App.canvas = document.querySelector('#output');
+	//App.canvas.style.display = 'none';
+	//App.context = App.canvas.getContext('2d');
+	App.info = document.querySelector('#info');
+	
+	navigator.getUserMedia_ = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+	
+	try {
+		navigator.getUserMedia_({
+			video: true,
+			audio: false
+		}, App.start, App.denied);
+	} catch (e) {
+		try {
+			navigator.getUserMedia_('video', App.start, App.denied);
+		} catch (e) {
+			App.error(e);
+		}
+	}
+	
+	App.video.loop = App.video.muted = true;
+	App.video.load();
+};
+
+App.init();
+
+		</script>
+
+		<script>
+			var container;
+			var camera, scene, renderer;
+			var statsEnabled = false, stats;
+			var poptart, face, feet, tail;
 			var stars, numStars=10, rainbow, rainChunk, numRainChunks=30;
 			var mouseX = 0, mouseY = 0;
+			var faceZ=0;
 			var windowHalfX = window.innerWidth / 2;
 			var windowHalfY = window.innerHeight / 2;
 			var clock = new THREE.Clock(), deltaSum=0, tick=0, frame=0, running=true;
@@ -58,6 +196,7 @@
 
 			init();
 			animate();
+
 			function helper(o, x, y, z, w, h, d, c){
 				var material = new THREE.MeshLambertMaterial( { color: c} );
 				var geometry = new THREE.CubeGeometry(w, h, d, 1, 1, 1);
@@ -288,8 +427,8 @@
 				}
 			}
 			function onDocumentMouseMove(event) {
-				mouseX = ( event.clientX - windowHalfX );
-				mouseY = ( event.clientY - windowHalfY );
+				//mouseX = ( event.clientX - windowHalfX );
+				//mouseY = ( event.clientY - windowHalfY );
 			}
 			function onDocumentMouseDown(event) {
 				running=!running;
@@ -396,11 +535,56 @@
 							break;
 					}
 				}
-				camera.position.x += ( mouseX - camera.position.x ) * .005;
-				camera.position.y += ( - mouseY - camera.position.y ) * .005;
+				camera.position.x += ( mouseX - camera.position.x )/4;
+				camera.position.y += ( mouseY - camera.position.y )/4;
+				//camera.setLens(camera.fov+((((faceZ-20)*10)-camera.fov)/4));
+
+
+				//TODO: Figure out how to prevent jumping and jiggling.
+				/*/
+				var diff=mouseX - camera.position.x;
+				console.log(diff);
+				var maxDiff=5;
+				var minDiff=0;
+				if(Math.abs(diff)>minDiff){
+					if(diff>0){
+						diff=Math.min(diff,maxDiff);
+					}else{
+						diff=Math.max(diff,-maxDiff);
+					}
+					camera.position.x += diff;
+				}
+				
+
+				diff=mouseY- camera.position.y;
+				if(Math.abs(diff)>minDiff){
+					if(diff>0){
+						diff=Math.min(diff,maxDiff);
+					}else{
+						diff=Math.max(diff,-maxDiff);
+					}
+					camera.position.y += diff;
+				}
+
+				diff=faceZ- camera.fov;
+				if(Math.abs(diff)>minDiff){
+					if(diff>0){
+						diff=Math.min(diff,maxDiff);
+					}else{
+						diff=Math.max(diff,-maxDiff);
+					}
+					camera.setLens(camera.fov+diff);
+				}
+				/**/
+
+
 				camera.lookAt( scene.position );
 				renderer.render( scene, camera );
 			}
+
+
 		</script>
+
+
 	</body>
 </html>
